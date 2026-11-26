@@ -15,6 +15,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1
 button,select{font:inherit;color:inherit}
 #map{position:fixed;inset:0;background:#0e1013}
 .leaflet-container{background:#0e1013}
+.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9) saturate(.6)}
 .cond{font-family:"Barlow Condensed",Barlow,sans-serif;letter-spacing:.01em}
 
 /* browse sheet */
@@ -171,7 +172,11 @@ function speak(t){ if(muted||!('speechSynthesis' in window)) return; try{ speech
 
 // ---------- map ----------
 const map = L.map('map',{zoomControl:false,attributionControl:true}).setView([56.8,-4.6],7);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap contributors &copy; CARTO'}).addTo(map);
+// Base map: OpenStreetMap (free, no API key), darkened with CSS. Falls back to Esri if OSM tiles fail.
+let baseErrs=0;
+const base=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
+base.on('tileerror',()=>{ if(++baseErrs===6){ map.removeLayer(base);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors'}).addTo(map); } });
 const roadLayer = L.layerGroup().addTo(map), routeLayer = L.layerGroup().addTo(map);
 let meMarker = null;
 map.on('dragstart',()=>lastPan=Date.now());
