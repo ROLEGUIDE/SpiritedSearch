@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#14171c">
+<title>Twisty – driver's roads near you</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#14171c;--panel:#1d2128;--line:#2c323c;--ink:#eef0f3;--mute:#9aa3af;--sign:#ffcc00;--hot:#ef476f;--go:#3ddc97}
+*{box-sizing:border-box;min-width:0}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.45 Barlow,system-ui,sans-serif;overflow:hidden}
+button,select{font:inherit;color:inherit}
+#map{position:fixed;inset:0;background:#0e1013}
+.leaflet-container{background:#0e1013}
+.cond{font-family:"Barlow Condensed",Barlow,sans-serif;letter-spacing:.01em}
+
+/* browse sheet */
+#sheet{position:fixed;left:0;right:0;bottom:0;max-height:52vh;display:flex;flex-direction:column;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:12px 14px calc(10px + env(safe-area-inset-bottom));z-index:500;box-shadow:0 -10px 30px #0008}
+@media(min-width:900px){#sheet{left:16px;right:auto;top:16px;bottom:16px;width:380px;max-height:none;border-radius:18px;border:1px solid var(--line)}}
+.brand{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+.brand b{font:700 28px/1 "Barlow Condensed";color:var(--sign)}
+.brand span{color:var(--mute);font-size:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.seg{display:flex;background:#12151a;border-radius:12px;padding:3px;flex:1 1 220px}
+.seg button{flex:1;border:0;background:none;padding:9px 6px;border-radius:9px;font-weight:600;min-height:40px;cursor:pointer}
+.seg button.on{background:var(--sign);color:#14171c}
+select{background:#12151a;border:1px solid var(--line);border-radius:12px;padding:9px 10px;min-height:44px}
+.btn{border:0;border-radius:12px;padding:10px 16px;min-height:44px;font-weight:600;cursor:pointer;background:#2a303a}
+.btn.primary{background:var(--sign);color:#14171c}
+.btn:focus-visible,.seg button:focus-visible,select:focus-visible{outline:2px solid var(--sign);outline-offset:2px}
+#status{color:var(--mute);font-size:14px;margin:8px 0 4px;min-height:20px}
+#list{overflow-y:auto;margin:0 -14px;padding:0 14px;-webkit-overflow-scrolling:touch}
+.road{display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:center;padding:11px 0;border-top:1px solid var(--line);cursor:pointer}
+.road.sel{background:linear-gradient(90deg,#ffcc0014,transparent)}
+.rank{font:700 24px/1 "Barlow Condensed";color:var(--mute);text-align:center}
+.road h3{margin:0;font:600 19px/1.15 "Barlow Condensed";white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{font-size:13px;color:var(--mute);display:flex;gap:10px;flex-wrap:wrap}
+.meta i{font-style:normal;color:var(--ink)}
+.stars{color:var(--sign);font-size:14px;letter-spacing:1px}
+.go{background:var(--go);color:#0b1d15;border:0;border-radius:10px;padding:8px 12px;font-weight:700;min-height:44px;cursor:pointer}
+.gm{display:grid;place-items:center;background:#fff;color:#1a73e8;border-radius:10px;padding:6px 10px;font-weight:700;font-size:13px;min-height:40px;text-decoration:none;text-align:center}
+.empty{color:var(--mute);font-size:14px;padding:10px 0}
+
+/* drive mode */
+#drive{display:none}
+body.driving #sheet{display:none}
+body.driving #drive{display:block}
+#banner{position:fixed;top:calc(10px + env(safe-area-inset-top));left:10px;right:10px;z-index:600;background:#0f5132;border-radius:16px;padding:12px 14px;display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:center;box-shadow:0 8px 24px #0009}
+#arrow{font:700 54px/1 "Barlow Condensed";text-align:center}
+#ndist{font:700 30px/1 "Barlow Condensed"}
+#ntext{font-size:17px;font-weight:500;line-height:1.25}
+#dash{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:600;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;background:#0d0f13ee;border:1px solid var(--line);border-radius:18px;padding:10px 14px}
+#speedo{text-align:center;cursor:pointer;min-width:96px}
+#spd{font:700 64px/0.9 "Barlow Condensed";transition:color .2s}
+#spd.over{color:var(--hot)}
+#unit{font-size:13px;color:var(--mute)}
+#limit{width:58px;height:58px;border-radius:50%;border:6px solid #d62828;background:#fff;color:#111;display:none;place-items:center;font:700 24px/1 "Barlow Condensed"}
+#roadname{font:600 18px/1.2 "Barlow Condensed";color:var(--ink)}
+#sub{font-size:13px;color:var(--mute)}
+.dbtns{display:flex;flex-direction:column;gap:6px}
+.dbtns .btn{padding:8px 12px;min-height:40px;font-size:14px}
+#stop{background:var(--hot);color:#fff}
+#simtag{position:fixed;top:calc(110px + env(safe-area-inset-top));right:14px;z-index:600;background:var(--sign);color:#111;font-weight:700;font-size:12px;padding:3px 8px;border-radius:6px;display:none}
+
+.me{width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #4cc9f0;filter:drop-shadow(0 0 4px #000)}
+.medot{width:18px;height:18px;border-radius:50%;background:#4cc9f0;border:3px solid #fff;box-shadow:0 0 0 6px #4cc9f033}
+
+/* modal + toast */
+#modal{position:fixed;inset:0;z-index:900;background:#000b;display:none;place-items:center;padding:20px}
+#modal .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;max-width:420px}
+#modal h2{margin:0 0 8px;font:700 28px/1.05 "Barlow Condensed";color:var(--sign)}
+#modal p{margin:0 0 10px;color:#cfd4db}
+#toast{position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:950;background:#000d;padding:10px 16px;border-radius:12px;font-size:14px;display:none;max-width:90vw}
+@media(prefers-reduced-motion:reduce){#spd{transition:none}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<section id="sheet">
+  <div class="brand"><b>TWISTY</b><span>driver's roads near you</span></div>
+  <div class="row">
+    <div class="seg" id="modes">
+      <button data-m="twisty" class="on">Twisty</button>
+      <button data-m="scenic">Scenic</button>
+      <button data-m="both">Both</button>
+    </div>
+    <select id="radius" aria-label="Search radius">
+      <option value="10">6 mi</option>
+      <option value="20" selected>12 mi</option>
+      <option value="35">22 mi</option>
+    </select>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button class="btn primary" id="near" style="flex:1">Find roads near me</button>
+    <button class="btn" id="here">Search this area</button>
+  </div>
+  <div id="status">Tap "Find roads near me" to start.</div>
+  <div id="list"></div>
+</section>
+
+<section id="drive">
+  <div id="banner">
+    <div id="arrow">↑</div>
+    <div><div id="ndist">–</div><div id="ntext">Getting route…</div></div>
+  </div>
+  <div id="simtag">SIMULATION</div>
+  <div id="dash">
+    <div id="speedo" title="Tap to switch units"><div id="spd">0</div><div id="unit">mph</div></div>
+    <div style="display:flex;gap:12px;align-items:center">
+      <div id="limit"></div>
+      <div><div id="roadname">–</div><div id="sub"></div></div>
+    </div>
+    <div class="dbtns">
+      <button class="btn" id="mute">Mute</button>
+      <button class="btn" id="stop">End</button>
+    </div>
+  </div>
+</section>
+
+<div id="modal"><div class="card">
+  <h2>Before you drive</h2>
+  <p>Put your phone in a cradle and pick your road before you set off. It's illegal to hold your phone while driving.</p>
+  <p>Speed limits come from OpenStreetMap and can be missing or wrong, so the road signs always win. These roads are picked for bends and views, not speed.</p>
+  <button class="btn primary" id="ok" style="width:100%">Got it</button>
+</div></div>
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+{
+const $ = s => document.querySelector(s);
+const OVERPASS = ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+const OSRM = 'https://router.project-osrm.org/route/v1/driving/';
+const ELEV = 'https://api.open-meteo.com/v1/elevation';
+const store = { get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}}, set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}} };
+
+// ---------- state ----------
+let mode = store.get('mode','twisty'), units = store.get('units','mph'), muted = false;
+let me = null, lastFix = null, roads = [], rawWays = [], selected = null;
+let drive = null, simTimer = null, wakeLock = null, lastPan = 0;
+
+// ---------- geometry ----------
+const R = 6371000, rad = d => d*Math.PI/180;
+const dist = (a,b) => { const x = rad(b[1]-a[1])*Math.cos(rad((a[0]+b[0])/2)), y = rad(b[0]-a[0]); return Math.hypot(x,y)*R; };
+const pathLen = g => { let s=0; for(let i=1;i<g.length;i++) s+=dist(g[i-1],g[i]); return s; };
+function circR(a,b,c){ const A=dist(a,b),B=dist(b,c),C=dist(c,a),s=(A+B+C)/2; const ar=Math.sqrt(Math.max(0,s*(s-A)*(s-B)*(s-C))); return ar<1e-6?Infinity:A*B*C/(4*ar); }
+// curvature method after Adam Franco's "curvature" project: weight distance spent in curves by tightness
+function curvature(g){ let c=0; for(let i=1;i<g.length-1;i++){ const r=circR(g[i-1],g[i],g[i+1]), len=dist(g[i-1],g[i]); c+=len*(r<30?2:r<60?1.6:r<100?1.3:r<175?1:0); } return c; }
+function segDist(p,a,b){ const k=Math.cos(rad(p[0])); const ax=(a[1]-p[1])*k,ay=a[0]-p[0],bx=(b[1]-p[1])*k,by=b[0]-p[0],dx=bx-ax,dy=by-ay; let t=-(ax*dx+ay*dy)/((dx*dx+dy*dy)||1); t=Math.max(0,Math.min(1,t)); return Math.hypot(ax+t*dx,ay+t*dy)*rad(1)*R; }
+function lineDist(p,g){ let m=Infinity,idx=0; for(let i=1;i<g.length;i++){ const d=segDist(p,g[i-1],g[i]); if(d<m){m=d;idx=i;} } return {d:m,idx}; }
+function sampleEvery(g,step){ const out=[g[0]]; let acc=0; for(let i=1;i<g.length;i++){ acc+=dist(g[i-1],g[i]); if(acc>=step){out.push(g[i]);acc=0;} } out.push(g[g.length-1]); return out; }
+function bearing(a,b){ const y=Math.sin(rad(b[1]-a[1]))*Math.cos(rad(b[0])), x=Math.cos(rad(a[0]))*Math.sin(rad(b[0]))-Math.sin(rad(a[0]))*Math.cos(rad(b[0]))*Math.cos(rad(b[1]-a[1])); return (Math.atan2(y,x)*180/Math.PI+360)%360; }
+
+// ---------- formatting ----------
+const toUnit = ms => units==='mph' ? ms*2.23694 : ms*3.6;
+function fmtDist(m, voice){
+  if(units==='mph'){ if(m<300){ const y=Math.max(10,Math.round(m*1.0936/10)*10); return voice?`${y} yards`:`${y} yd`; }
+    const mi=m/1609.34; if(voice){ if(mi<0.4) return 'a quarter of a mile'; if(mi<0.65) return 'half a mile'; return `${mi.toFixed(1)} miles`; } return `${mi.toFixed(1)} mi`; }
+  if(m<1000){ const v=Math.max(10,Math.round(m/10)*10); return voice?`${v} metres`:`${v} m`; }
+  return voice?`${(m/1000).toFixed(1)} kilometres`:`${(m/1000).toFixed(1)} km`;
+}
+const fmtLen = m => units==='mph' ? `${(m/1609.34).toFixed(1)} mi` : `${(m/1000).toFixed(1)} km`;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(t,ms=3000){ const el=$('#toast'); el.textContent=t; el.style.display='block'; clearTimeout(toast.t); toast.t=setTimeout(()=>el.style.display='none',ms); }
+const status = t => $('#status').textContent = t;
+function speak(t){ if(muted||!('speechSynthesis' in window)) return; try{ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(t); u.lang='en-GB'; u.rate=1.02; speechSynthesis.speak(u); }catch(e){} }
+
+// ---------- map ----------
+const map = L.map('map',{zoomControl:false,attributionControl:true}).setView([56.8,-4.6],7);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap contributors &copy; CARTO'}).addTo(map);
+const roadLayer = L.layerGroup().addTo(map), routeLayer = L.layerGroup().addTo(map);
+let meMarker = null;
+map.on('dragstart',()=>lastPan=Date.now());
+function drawMe(){
+  if(!me) return;
+  const ll=[me.lat,me.lon], driving=!!drive;
+  const html = driving ? `<div class="me" style="transform:rotate(${me.heading||0}deg)"></div>` : '<div class="medot"></div>';
+  if(!meMarker){ meMarker=L.marker(ll,{icon:L.divIcon({className:'',html,iconSize:[22,26],iconAnchor:[11,13]}),interactive:false,zIndexOffset:1000}).addTo(map); }
+  else { meMarker.setLatLng(ll); meMarker.setIcon(L.divIcon({className:'',html,iconSize:[22,26],iconAnchor:[11,13]})); }
+}
+
+// ---------- GPS ----------
+function onPos(p){
+  if(drive && drive.sim && !p.sim) return;
+  const now=p.t||Date.now(), here=[p.lat,p.lon];
+  let speed=p.speed, heading=p.heading;
+  if(lastFix){ const dt=(now-lastFix.t)/1000, d=dist([lastFix.lat,lastFix.lon],here);
+    if((speed==null||isNaN(speed)) && dt>0.4) speed=d/dt;
+    if((heading==null||isNaN(heading)) && d>3) heading=bearing([lastFix.lat,lastFix.lon],here); }
+  me={lat:p.lat,lon:p.lon,speed:speed||0,heading:heading??(me?me.heading:0),acc:p.acc};
+  lastFix={lat:p.lat,lon:p.lon,t:now};
+  drawMe();
+  if(drive) onDriveTick();
+}
+let watchId=null;
+function startGPS(){
+  if(watchId!==null) return true;
+  if(!('geolocation' in navigator)){ toast('This browser has no GPS access'); return false; }
+  watchId=navigator.geolocation.watchPosition(
+    pos=>onPos({lat:pos.coords.latitude,lon:pos.coords.longitude,speed:pos.coords.speed,heading:pos.coords.heading,acc:pos.coords.accuracy,t:pos.timestamp}),
+    err=>{ toast(err.code===1?'Location blocked. Allow it in your browser settings, or use "Search this area".':'Waiting for a GPS signal…',5000); },
+    {enableHighAccuracy:true,maximumAge:1000,timeout:20000});
+  return true;
+}
+const waitForFix = (ms=15000) => new Promise((res,rej)=>{ if(me) return res(me); const t0=Date.now(); const iv=setInterval(()=>{ if(me){clearInterval(iv);res(me);} else if(Date.now()-t0>ms){clearInterval(iv);rej(new Error('No GPS fix yet. Try again outside, or use "Search this area".'));} },300); });
+
+// ---------- data ----------
+async function overpass(q){
+  for(const url of OVERPASS){
+    try{ const r=await fetch(url,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'}}); if(r.ok) return await r.json(); }catch(e){}
+  }
+  throw new Error('The map data server is busy. Try again in a minute.');
+}
+function parseMax(t){
+  const s=t.maxspeed, ty=t['maxspeed:type']||'';
+  if(!s){ if(/nsl_single/.test(ty)) return 60; if(/nsl_dual/.test(ty)) return 70; return null; }
+  if(/nsl_single|national/i.test(s)) return 60; if(/nsl_dual/i.test(s)) return 70;
+  const m=String(s).match(/(\d+)\s*(mph)?/); if(!m) return null;
+  return m[2] ? +m[1] : Math.round(+m[1]*0.621371);
+}
+function chainWays(ways){
+  const groups=new Map();
+  for(const w of ways){ const k=w.tags.ref||w.tags.name||('#'+w.id); if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(w); }
+  const chains=[];
+  for(const list of groups.values()){
+    const unused=new Set(list);
+    while(unused.size){
+      const w=unused.values().next().value; unused.delete(w);
+      let nodes=[...w.nodes], g=[...w.g], grew=true;
+      while(grew){ grew=false;
+        for(const v of unused){
+          const tail=nodes[nodes.length-1], head=nodes[0], vn=v.nodes, vg=v.g;
+          if(vn[0]===tail){ nodes=nodes.concat(vn.slice(1)); g=g.concat(vg.slice(1)); }
+          else if(vn[vn.length-1]===tail){ nodes=nodes.concat([...vn].reverse().slice(1)); g=g.concat([...vg].reverse().slice(1)); }
+          else if(vn[vn.length-1]===head){ nodes=vn.concat(nodes.slice(1)); g=vg.concat(g.slice(1)); }
+          else if(vn[0]===head){ nodes=[...vn].reverse().concat(nodes.slice(1)); g=[...vg].reverse().concat(g.slice(1)); }
+          else continue;
+          unused.delete(v); grew=true;
+        }
+      }
+      chains.push({name:w.tags.name||'',ref:w.tags.ref||'',hw:w.tags.highway,g});
+    }
+  }
+  return chains;
+}
+const SCENIC_W = t => t.tourism==='viewpoint'?3 : t.natural==='coastline'||t.natural==='beach'||t.natural==='cliff'?2 : t.natural==='water'?2 : t.natural==='peak'?1.2 : t.leisure==='nature_reserve'?1.5 : (t.landuse==='forest'||t.natural==='wood')?0.5 : 0;
+
+async function findRoads(center){
+  const [lat,lon]=center, r=(+$('#radius').value)*1000, r2=r+2000;
+  roadLayer.clearLayers(); $('#list').innerHTML=''; selected=null;
+  status('Downloading roads… (can take 10–30 seconds)');
+  const qRoads=`[out:json][timeout:90];way["highway"~"^(trunk|primary|secondary|tertiary|unclassified)$"]["junction"!="roundabout"]["oneway"!="yes"]["area"!="yes"](around:${r},${lat},${lon});out body geom;`;
+  const a=`(around:${r2},${lat},${lon})`;
+  const qScene=`[out:json][timeout:90];(node["tourism"="viewpoint"]${a};node["natural"~"^(peak|beach|cliff)$"]${a};way["natural"~"^(water|coastline|beach|cliff|wood)$"]${a};relation["natural"="water"]${a};way["landuse"="forest"]${a};way["leisure"="nature_reserve"]${a};);out tags center;`;
+  const [rd,sc]=await Promise.all([overpass(qRoads), overpass(qScene).catch(()=>({elements:[]}))]);
+  status('Scoring bends and scenery…');
+  await new Promise(r=>setTimeout(r,30));
+
+  rawWays = rd.elements.filter(e=>e.type==='way'&&e.geometry).map(e=>{
+    const g=e.geometry.map(p=>[p.lat,p.lon]); let s=90,n=-90,w=180,ea=-180;
+    for(const p of g){ s=Math.min(s,p[0]);n=Math.max(n,p[0]);w=Math.min(w,p[1]);ea=Math.max(ea,p[1]); }
+    return {id:e.id,nodes:e.nodes,g,tags:e.tags||{},max:parseMax(e.tags||{}),bb:[s,w,n,ea]};
+  });
+  const rural = rawWays.filter(w=>{ if(w.tags.lit==='yes') return false; if(w.max && w.max<=30) return false; return true; });
+
+  // scenic features in a coarse grid
+  const grid=new Map(), key=(la,lo)=>Math.floor(la/0.02)+','+Math.floor(lo/0.03);
+  sc.elements.forEach((e,i)=>{ const la=e.lat??e.center?.lat, lo=e.lon??e.center?.lon, w=SCENIC_W(e.tags||{}); if(la==null||!w) return;
+    const k=key(la,lo); if(!grid.has(k)) grid.set(k,[]); grid.get(k).push({i,p:[la,lo],w}); });
+
+  roads = chainWays(rural).map(c=>{
+    const len=pathLen(c.g); if(len<2000) return null;
+    const curv=curvature(c.g), dens=curv/(len/1000);
+    if(curv<250 || dens<25) return null;
+    const twist=Math.min(10, 0.6*Math.min(10,Math.sqrt(curv)/5) + 0.4*Math.min(10,dens/25));
+    const seen=new Set(); let sum=0;
+    for(const p of sampleEvery(c.g,400)){
+      const ky=Math.floor(p[0]/0.02), kx=Math.floor(p[1]/0.03);
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){ const cell=grid.get((ky+dy)+','+(kx+dx)); if(!cell) continue;
+        for(const f of cell){ if(!seen.has(f.i) && dist(p,f.p)<1200){ seen.add(f.i); sum+=f.w; } } }
+    }
+    const scenic=Math.min(10, 1.8*Math.sqrt(sum));
+    return {...c,len,curv,twist,scenic,hills:null,label:c.name||c.ref||'Unnamed road',sub:c.name&&c.ref?c.ref:''};
+  }).filter(Boolean);
+
+  if(!roads.length){ status('No twisty roads found here. Try a bigger radius or a more rural area.'); return; }
+  render();
+  status(`${roads.length} roads found. Checking hills…`);
+  await addHills(sorted().slice(0,30));
+  render();
+  status(`${roads.length} roads found. Tap one to preview it.`);
+}
+async function addHills(list){
+  const pts=[], own=[];
+  list.forEach((r,ri)=>{ for(let k=0;k<8;k++){ const p=r.g[Math.round(k*(r.g.length-1)/7)]; pts.push(p); own.push(ri); } });
+  const elev=[];
+  try{
+    for(let i=0;i<pts.length;i+=100){
+      const ch=pts.slice(i,i+100);
+      const res=await fetch(`${ELEV}?latitude=${ch.map(p=>p[0].toFixed(5)).join(',')}&longitude=${ch.map(p=>p[1].toFixed(5)).join(',')}`);
+      const j=await res.json(); elev.push(...(j.elevation||[]));
+    }
+  }catch(e){ return; }
+  list.forEach((r,ri)=>{ const e=elev.slice(ri*8,ri*8+8); if(e.length<8) return; let up=0; for(let k=1;k<8;k++) up+=Math.abs(e[k]-e[k-1]);
+    r.climb=up; r.hills=Math.min(10,(up/(r.len/1000))/4); });
+}
+function score(r){ const h=r.hills??3; return mode==='twisty'? .8*r.twist+.2*h : mode==='scenic'? .7*r.scenic+.3*h : .45*r.twist+.2*h+.35*r.scenic; }
+const sorted = () => [...roads].sort((a,b)=>score(b)-score(a));
+const colour = s => `hsl(${Math.round(48-48*Math.min(1,Math.max(0,(s-3)/6)))+ (s>7?0:0)},95%,${55}%)`;
+
+function render(){
+  roadLayer.clearLayers();
+  const top=sorted().slice(0,30);
+  top.slice().reverse().forEach(r=>{
+    const s=score(r), sel=r===selected;
+    L.polyline(r.g,{color:'#000',weight:sel?11:8,opacity:.6}).addTo(roadLayer);
+    L.polyline(r.g,{color:sel?'#ffffff':colour(s),weight:sel?6:4.5,opacity:.95}).on('click',()=>select(r,true)).addTo(roadLayer);
+  });
+  $('#list').innerHTML = top.map((r,i)=>{
+    const s=score(r), st=Math.round(s/2);
+    return `<div class="road${r===selected?' sel':''}" data-i="${roads.indexOf(r)}">
+      <div class="rank">${i+1}</div>
+      <div><h3>${esc(r.label)}${r.sub?` <span style="color:var(--mute);font-weight:500">${esc(r.sub)}</span>`:''}</h3>
+        <div class="meta"><span class="stars">${'★'.repeat(st)}${'☆'.repeat(5-st)}</span><span>${fmtLen(r.len)}</span>
+        <span>Bends <i>${r.twist.toFixed(1)}</i></span><span>Views <i>${r.scenic.toFixed(1)}</i></span>${r.hills!=null?`<span>Hills <i>${r.hills.toFixed(1)}</i></span>`:''}</div></div>
+      <div style="display:flex;flex-direction:column;gap:6px"><button class="go" data-go="${roads.indexOf(r)}">Drive</button>
+      <a class="gm" href="${gmapsUrl(r)}" target="_blank" rel="noopener">Google Maps</a></div></div>`;
+  }).join('');
+}
+// Hand the road to Google Maps: start of road + 2 points along it as waypoints, end as destination (3 waypoints max on mobile)
+function gmapsUrl(r){
+  const from=me?[me.lat,me.lon]:null;
+  const g = from && dist(from,r.g[r.g.length-1])<dist(from,r.g[0]) ? [...r.g].reverse() : r.g;
+  const at=f=>g[Math.min(g.length-1,Math.round(f*(g.length-1)))], ll=p=>`${p[0].toFixed(5)},${p[1].toFixed(5)}`;
+  const wps=[g[0],at(.4),at(.75)].map(ll).join('|');
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(ll(g[g.length-1]))}&waypoints=${encodeURIComponent(wps)}&travelmode=driving&dir_action=navigate`;
+}
+function select(r,fromMap){
+  selected=r; render();
+  map.fitBounds(L.latLngBounds(r.g),{padding:[40,40],paddingBottomRight:[40, window.innerWidth<900?window.innerHeight*0.5:40],paddingTopLeft:[window.innerWidth>=900?420:40,40]});
+  if(fromMap){ const el=$(`.road[data-i="${roads.indexOf(r)}"]`); el&&el.scrollIntoView({block:'nearest',behavior:'smooth'}); }
+}
+
+// ---------- navigation ----------
+const ARROWS={left:'↰',right:'↱','slight left':'↖','slight right':'↗','sharp left':'↲','sharp right':'↳',straight:'↑',uturn:'↶'};
+const ORD=['first','second','third','fourth','fifth','sixth','seventh'];
+const COMPASS=['north','north-east','east','south-east','south','south-west','west','north-west'];
+function instr(s,kind,roadName){
+  const m=s.maneuver, mod=m.modifier||'', nm=s.name||s.ref||'', onto=nm?` onto ${nm}`:'';
+  switch(m.type){
+    case 'depart': return {t:`Head ${COMPASS[Math.round((m.bearing_after||0)/45)%8]}${nm?' on '+nm:''}`,a:'↑'};
+    case 'arrive': return kind==='start'?{t:`You're at the start of ${roadName}. Enjoy the drive`,a:'⚑'}:{t:`You've reached the end of ${roadName}`,a:'⚑'};
+    case 'roundabout': case 'rotary': case 'roundabout turn': return {t:`At the roundabout, take the ${ORD[(m.exit||1)-1]||m.exit+'th'} exit${onto}`,a:'⟳'};
+    case 'exit roundabout': case 'exit rotary': case 'notification': case 'new name': return null;
+    case 'fork': return {t:`Keep ${mod.includes('left')?'left':'right'}${onto}`,a:ARROWS[mod]||'↑'};
+    case 'merge': return {t:`Merge${onto}`,a:ARROWS[mod]||'↑'};
+    case 'on ramp': return {t:`Take the slip road${onto}`,a:ARROWS[mod]||'↗'};
+    case 'off ramp': return {t:`Take the exit${onto}`,a:ARROWS[mod]||'↗'};
+    case 'continue': if(!mod||mod==='straight') return null; // fall through
+    default:
+      if(mod==='uturn') return {t:'Make a U-turn',a:ARROWS.uturn};
+      if(mod==='straight') return {t:`Go straight on${onto}`,a:'↑'};
+      return {t:`Turn ${mod||'ahead'}${onto}`,a:ARROWS[mod]||'↑'};
+  }
+}
+async function routeFrom(from){
+  const pts=[from,...drive.wps.map(w=>w.p)];
+  const url=OSRM+pts.map(p=>`${p[1].toFixed(6)},${p[0].toFixed(6)}`).join(';')+'?overview=full&geometries=geojson&steps=true';
+  const r=await fetch(url); const j=await r.json();
+  if(j.code!=='Ok'||!j.routes?.length) throw new Error('Could not plan a route there');
+  const rt=j.routes[0], steps=[];
+  rt.legs.forEach((leg,li)=>leg.steps.forEach(s=>{
+    const ty=s.maneuver.type, kind=drive.wps[li]?.kind;
+    if(ty==='depart'&&li>0) return; if(ty==='arrive'&&kind==='via') return;
+    const ins=instr(s,kind,drive.road.label); if(!ins) return;
+    steps.push({...ins,loc:[s.maneuver.location[1],s.maneuver.location[0]],name:s.name||s.ref||'',min:Infinity,a1:false,a2:false});
+  }));
+  drive.line=rt.geometry.coordinates.map(c=>[c[1],c[0]]);
+  drive.steps=steps; drive.cur=steps.length>1?1:0; drive.off=0; drive.total=rt.distance; drive.simD=0;
+  routeLayer.clearLayers();
+  L.polyline(drive.line,{color:'#000',weight:10,opacity:.5}).addTo(routeLayer);
+  L.polyline(drive.line,{color:'#4cc9f0',weight:6,opacity:.95}).addTo(routeLayer);
+  L.polyline(drive.road.g,{color:'#ffcc00',weight:3,opacity:.9,dashArray:'6 8'}).addTo(routeLayer);
+  return steps;
+}
+async function startDrive(r){
+  const sim=!me;
+  if(sim) toast('No GPS fix, so running a simulation along the route',4000);
+  const from=me?[me.lat,me.lon]:null;
+  const g = from && dist(from,r.g[r.g.length-1])<dist(from,r.g[0]) ? [...r.g].reverse() : r.g;
+  const at=f=>g[Math.min(g.length-1,Math.round(f*(g.length-1)))];
+  drive={road:r,sim,wps:[{p:g[0],kind:'start'},{p:at(.33),kind:'via'},{p:at(.66),kind:'via'},{p:g[g.length-1],kind:'end'}],lastReroute:Date.now()};
+  document.body.classList.add('driving'); $('#simtag').style.display=sim?'block':'none';
+  $('#ntext').textContent='Planning route…'; $('#roadname').textContent=r.label;
+  try{
+    await routeFrom(from||g[0]);
+  }catch(e){ toast(e.message); stopDrive(); return; }
+  if(drive.steps[0]) speak(`Route to ${r.label}. ${drive.steps[0].t}`);
+  try{ if('wakeLock' in navigator) wakeLock=await navigator.wakeLock.request('screen'); }catch(e){}
+  map.setView(from||g[0],16);
+  if(sim){ me=null; lastFix=null; simTimer=setInterval(simStep,1000); simStep(); }
+  else onDriveTick();
+}
+function simStep(){
+  if(!drive) return;
+  drive.simD+=20; // ~45 mph
+  const g=drive.line; let acc=0;
+  for(let i=1;i<g.length;i++){ const d=dist(g[i-1],g[i]);
+    if(acc+d>=drive.simD){ const f=(drive.simD-acc)/d, p=[g[i-1][0]+(g[i][0]-g[i-1][0])*f, g[i-1][1]+(g[i][1]-g[i-1][1])*f];
+      return onPos({lat:p[0],lon:p[1],speed:20,heading:bearing(g[i-1],g[i]),sim:true}); }
+    acc+=d; }
+  clearInterval(simTimer);
+}
+function stopDrive(){
+  clearInterval(simTimer); simTimer=null;
+  if(drive&&drive.sim){ me=null; lastFix=null; if(meMarker){map.removeLayer(meMarker);meMarker=null;} }
+  drive=null; routeLayer.clearLayers(); document.body.classList.remove('driving');
+  try{ wakeLock&&wakeLock.release(); }catch(e){} wakeLock=null;
+  try{ speechSynthesis.cancel(); }catch(e){}
+  drawMe(); if(selected) select(selected);
+}
+function currentLimit(){
+  if(!me) return null; const p=[me.lat,me.lon], pad=0.0006; let best=null,bd=30;
+  for(const w of rawWays){ if(!w.max) continue; const b=w.bb;
+    if(p[0]<b[0]-pad||p[0]>b[2]+pad||p[1]<b[1]-pad||p[1]>b[3]+pad) continue;
+    const d=lineDist(p,w.g).d; if(d<bd){bd=d;best=w;} }
+  return best?best.max:null;
+}
+let limitAt=0, limitVal=null;
+async function onDriveTick(){
+  if(!drive||!drive.steps||!me) return;
+  const p=[me.lat,me.lon];
+  // speed + limit
+  const v=Math.round(toUnit(me.speed||0)); $('#spd').textContent=v; $('#unit').textContent=units;
+  if(Date.now()-limitAt>3000){ limitAt=Date.now(); limitVal=currentLimit(); }
+  const lim=limitVal==null?null:(units==='mph'?limitVal:Math.round(limitVal*1.609/10)*10);
+  $('#limit').style.display=lim?'grid':'none'; $('#limit').textContent=lim||'';
+  $('#spd').classList.toggle('over', !!lim && v>lim+1);
+  // follow
+  if(Date.now()-lastPan>8000) map.panTo(p,{animate:true,duration:.5});
+  // drop reached waypoints
+  while(drive.wps.length && dist(p,drive.wps[0].p)<60) drive.wps.shift();
+  // off-route
+  const ld=lineDist(p,drive.line);
+  drive.off = ld.d>60 ? drive.off+1 : 0;
+  if(drive.off>=4 && Date.now()-drive.lastReroute>15000 && drive.wps.length){
+    drive.lastReroute=Date.now(); speak('Rerouting'); $('#ntext').textContent='Rerouting…';
+    try{ await routeFrom(p); }catch(e){ toast('Reroute failed, retrying shortly'); }
+    return;
+  }
+  // step progress
+  let s=drive.steps[drive.cur];
+  if(!s){ $('#ndist').textContent=''; $('#ntext').textContent='Route complete'; return; }
+  let d=dist(p,s.loc);
+  if(d<25 || (s.min<60 && d>s.min+25)){
+    if(s.a==='⚑' && !s.a2) speak(s.t);
+    drive.cur++; s=drive.steps[drive.cur];
+    if(!s){ $('#arrow').textContent='⚑'; $('#ndist').textContent=''; $('#ntext').textContent='Route complete. Tap End.'; return; }
+    d=dist(p,s.loc);
+  }
+  s.min=Math.min(s.min,d);
+  const fast=(me.speed||0)>18;
+  if(!s.a1 && d<=(fast?800:400) && d>(fast?250:150)){ s.a1=true; speak(`In ${fmtDist(d,true)}, ${s.t.charAt(0).toLowerCase()+s.t.slice(1)}`); }
+  if(!s.a2 && d<=(fast?150:70)){ s.a2=true; speak(s.t); }
+  $('#arrow').textContent=s.a; $('#ndist').textContent=fmtDist(d); $('#ntext').textContent=s.t;
+  const prev=drive.steps[drive.cur-1]; $('#roadname').textContent=(prev&&prev.name)||drive.road.label;
+  $('#sub').textContent = drive.wps.length && drive.wps[0].kind==='start' ? `Heading to ${drive.road.label}` : `On your driver's road · ${fmtLen(drive.road.len)}`;
+}
+
+// ---------- UI wiring ----------
+document.querySelectorAll('#modes button').forEach(b=>{
+  b.classList.toggle('on',b.dataset.m===mode);
+  b.addEventListener('click',()=>{ mode=b.dataset.m; store.set('mode',mode); document.querySelectorAll('#modes button').forEach(x=>x.classList.toggle('on',x===b)); if(roads.length) render(); });
+});
+$('#near').addEventListener('click',async()=>{
+  if(!startGPS()) return;
+  status('Finding your location…');
+  try{ const f=await waitForFix(); map.setView([f.lat,f.lon],11); await findRoads([f.lat,f.lon]); }
+  catch(e){ status(e.message); }
+});
+$('#here').addEventListener('click',async()=>{ const c=map.getCenter(); try{ await findRoads([c.lat,c.lng]); }catch(e){ status(e.message); } });
+$('#list').addEventListener('click',e=>{
+  const go=e.target.closest('[data-go]'); if(go){ startDrive(roads[+go.dataset.go]); return; }
+  const row=e.target.closest('.road'); if(row) select(roads[+row.dataset.i]);
+});
+$('#stop').addEventListener('click',stopDrive);
+$('#mute').addEventListener('click',()=>{ muted=!muted; $('#mute').textContent=muted?'Unmute':'Mute'; if(muted) try{speechSynthesis.cancel()}catch(e){} });
+$('#speedo').addEventListener('click',()=>{ units=units==='mph'?'km/h':'mph'; store.set('units',units); onDriveTick(); });
+document.addEventListener('visibilitychange',async()=>{ if(drive&&document.visibilityState==='visible'&&'wakeLock' in navigator){ try{ wakeLock=await navigator.wakeLock.request('screen'); }catch(e){} } });
+if(!store.get('seenSafety',false)) $('#modal').style.display='grid';
+$('#ok').addEventListener('click',()=>{ $('#modal').style.display='none'; store.set('seenSafety',true); startGPS(); });
+if(store.get('seenSafety',false)) startGPS();
+}
+</script>
+</body>
+</html>
