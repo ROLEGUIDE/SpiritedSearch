@@ -274,9 +274,28 @@ function chainWays(ways){
 }
 const SCENIC_W = t => t.tourism==='viewpoint'?3 : t.natural==='coastline'||t.natural==='beach'||t.natural==='cliff'?2 : t.natural==='water'?2 : t.natural==='peak'?1.2 : t.leisure==='nature_reserve'?1.5 : (t.landuse==='forest'||t.natural==='wood')?0.5 : 0;
 
+// Home server mode: when this page is served by your PC, roads come pre-scored from it
+let HOME=false;
+const homeReady=fetch('api/health',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(j=>{ HOME=!!(j&&j.ok); if(HOME) status(`Home server connected (${j.roads.toLocaleString()} roads ready). Tap "Find roads near me".`); }).catch(()=>{});
+async function findRoadsHome(lat,lon,rKm){
+  status('Loading roads from your PC…');
+  const r=await fetch(`api/roads?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}&r=${rKm}`);
+  if(!r.ok) throw new Error('Home server error '+r.status);
+  const list=await r.json();
+  rawWays=[];
+  roads=list.map(x=>({...x,hills:null,label:x.name||x.ref||'Unnamed road',sub:x.name&&x.ref?x.ref:''}));
+  if(!roads.length){ status('No twisty roads found here. Try a bigger radius.'); return; }
+  render();
+  status(`${roads.length} roads found. Checking hills…`);
+  await addHills(sorted().slice(0,30));
+  render();
+  status(`${roads.length} roads found. Tap one to preview it.`);
+}
 async function findRoads(center){
   const [lat,lon]=center, rKm=+$('#radius').value;
   roadLayer.clearLayers(); $('#list').innerHTML=''; selected=null;
+  await homeReady;
+  if(HOME) return findRoadsHome(lat,lon,rKm);
   const {tiles,bbox}=tilesAround(lat,lon,rKm), byId=new Map();
   let failed=0;
   for(let i=0;i<tiles.length;i++){
@@ -403,7 +422,7 @@ function instr(s,kind,roadName){
 }
 async function routeFrom(from){
   const pts=[from,...drive.wps.map(w=>w.p)];
-  const url=OSRM+pts.map(p=>`${p[1].toFixed(6)},${p[0].toFixed(6)}`).join(';')+'?overview=full&geometries=geojson&steps=true';
+  const url=(HOME?'api/route/':OSRM)+pts.map(p=>`${p[1].toFixed(6)},${p[0].toFixed(6)}`).join(';')+'?overview=full&geometries=geojson&steps=true';
   const r=await fetch(url); const j=await r.json();
   if(j.code!=='Ok'||!j.routes?.length) throw new Error('Could not plan a route there');
   const rt=j.routes[0], steps=[];
@@ -470,7 +489,9 @@ async function onDriveTick(){
   const p=[me.lat,me.lon];
   // speed + limit
   const v=Math.round(toUnit(me.speed||0)); $('#spd').textContent=v; $('#unit').textContent=units;
-  if(Date.now()-limitAt>3000){ limitAt=Date.now(); limitVal=currentLimit(); }
+  if(Date.now()-limitAt>3000){ limitAt=Date.now();
+    if(HOME) fetch(`api/limit?lat=${me.lat.toFixed(6)}&lon=${me.lon.toFixed(6)}`).then(r=>r.json()).then(j=>{limitVal=j.max;}).catch(()=>{});
+    else limitVal=currentLimit(); }
   const lim=limitVal==null?null:(units==='mph'?limitVal:Math.round(limitVal*1.609/10)*10);
   $('#limit').style.display=lim?'grid':'none'; $('#limit').textContent=lim||'';
   $('#spd').classList.toggle('over', !!lim && v>lim+1);
