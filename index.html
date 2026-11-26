@@ -134,7 +134,8 @@ body.driving #drive{display:block}
 <script>
 {
 const $ = s => document.querySelector(s);
-const OVERPASS = ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+const OVERPASS = ['https://overpass-api.de/api/interpreter','https://overpass.private.coffee/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+let mirror = 0;
 const OSRM = 'https://router.project-osrm.org/route/v1/driving/';
 const ELEV = 'https://api.open-meteo.com/v1/elevation';
 const store = { get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}}, set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}} };
@@ -214,11 +215,30 @@ function startGPS(){
 const waitForFix = (ms=15000) => new Promise((res,rej)=>{ if(me) return res(me); const t0=Date.now(); const iv=setInterval(()=>{ if(me){clearInterval(iv);res(me);} else if(Date.now()-t0>ms){clearInterval(iv);rej(new Error('No GPS fix yet. Try again outside, or use "Search this area".'));} },300); });
 
 // ---------- data ----------
+// Try each mirror in turn (starting with the last one that worked), two rounds, backing off when a server is overloaded
 async function overpass(q){
-  for(const url of OVERPASS){
-    try{ const r=await fetch(url,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'}}); if(r.ok) return await r.json(); }catch(e){}
+  let last='no response';
+  for(let round=0; round<2; round++){
+    for(let k=0;k<OVERPASS.length;k++){
+      const idx=(mirror+k)%OVERPASS.length;
+      try{
+        const ctl=new AbortController(), timer=setTimeout(()=>ctl.abort(),45000);
+        const r=await fetch(OVERPASS[idx],{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'},signal:ctl.signal});
+        clearTimeout(timer);
+        if(r.ok){ const j=await r.json(); if(j.remark && /runtime error|timed out|out of memory/i.test(j.remark)){ last='server timeout'; continue; } mirror=idx; return j; }
+        last='error '+r.status;
+        if(r.status===429||r.status===504) await new Promise(res=>setTimeout(res,2500));
+      }catch(e){ last=e.name==='AbortError'?'timed out':'blocked or offline'; }
+    }
   }
-  throw new Error('The map data server is busy. Try again in a minute.');
+  throw new Error(`Couldn't download map data (${last}). Try a smaller radius or try again shortly.`);
+}
+// Split the search area into small tiles so each request stays light
+function tilesAround(lat,lon,rKm){
+  const dLat=rKm/111, dLon=rKm/(111*Math.cos(rad(lat)));
+  const s=lat-dLat,n=lat+dLat,w=lon-dLon,e=lon+dLon, tLat=0.15, tLon=0.25, out=[];
+  for(let a=s;a<n;a+=tLat) for(let b=w;b<e;b+=tLon) out.push([a,b,Math.min(a+tLat,n),Math.min(b+tLon,e)].map(v=>v.toFixed(4)).join(','));
+  return {tiles:out,bbox:[s,w,n,e].map(v=>v.toFixed(4)).join(',')};
 }
 function parseMax(t){
   const s=t.maxspeed, ty=t['maxspeed:type']||'';
@@ -255,13 +275,22 @@ function chainWays(ways){
 const SCENIC_W = t => t.tourism==='viewpoint'?3 : t.natural==='coastline'||t.natural==='beach'||t.natural==='cliff'?2 : t.natural==='water'?2 : t.natural==='peak'?1.2 : t.leisure==='nature_reserve'?1.5 : (t.landuse==='forest'||t.natural==='wood')?0.5 : 0;
 
 async function findRoads(center){
-  const [lat,lon]=center, r=(+$('#radius').value)*1000, r2=r+2000;
+  const [lat,lon]=center, rKm=+$('#radius').value;
   roadLayer.clearLayers(); $('#list').innerHTML=''; selected=null;
-  status('Downloading roads… (can take 10–30 seconds)');
-  const qRoads=`[out:json][timeout:90];way["highway"~"^(trunk|primary|secondary|tertiary|unclassified)$"]["junction"!="roundabout"]["oneway"!="yes"]["area"!="yes"](around:${r},${lat},${lon});out body geom;`;
-  const a=`(around:${r2},${lat},${lon})`;
-  const qScene=`[out:json][timeout:90];(node["tourism"="viewpoint"]${a};node["natural"~"^(peak|beach|cliff)$"]${a};way["natural"~"^(water|coastline|beach|cliff|wood)$"]${a};relation["natural"="water"]${a};way["landuse"="forest"]${a};way["leisure"="nature_reserve"]${a};);out tags center;`;
-  const [rd,sc]=await Promise.all([overpass(qRoads), overpass(qScene).catch(()=>({elements:[]}))]);
+  const {tiles,bbox}=tilesAround(lat,lon,rKm), byId=new Map();
+  let failed=0;
+  for(let i=0;i<tiles.length;i++){
+    status(`Downloading roads… area ${i+1} of ${tiles.length}`);
+    const q=`[out:json][timeout:40];way["highway"~"^(trunk|primary|secondary|tertiary|unclassified)$"]["junction"!="roundabout"]["oneway"!="yes"]["area"!="yes"](${tiles[i]});out body geom qt;`;
+    try{ const j=await overpass(q); for(const e of j.elements) if(e.type==='way') byId.set(e.id,e); }
+    catch(e){ failed++; if(failed>tiles.length/2) throw e; }
+  }
+  const rd={elements:[...byId.values()]};
+  status('Downloading scenery…');
+  const b=`(${bbox})`;
+  const qScene=`[out:json][timeout:40];(node["tourism"="viewpoint"]${b};node["natural"~"^(peak|beach|cliff)$"]${b};way["natural"~"^(water|coastline|beach|cliff)$"]${b};way["leisure"="nature_reserve"]${b};);out tags center qt;`;
+  const sc=await overpass(qScene).catch(()=>{ toast('Scenery data unavailable, so Views scores will be low this time'); return {elements:[]}; });
+  if(failed) toast(`${failed} of ${tiles.length} map areas didn't load, so a few roads may be missing`);
   status('Scoring bends and scenery…');
   await new Promise(r=>setTimeout(r,30));
 
